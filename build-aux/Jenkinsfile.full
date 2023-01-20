@@ -188,7 +188,7 @@ def generateNativeStage(platform) {
                 dir( "${platform}/build" ) {
                   powershell( script: 'Get-ChildItem')
                   powershell( script: '& ..\\..\\couchdb-glazier\\bin\\shell.ps1; make -f Makefile.win build-report')
-                  powershell( script: 'Get-Content .\test-results.log')
+                  powershell( script: 'Get-Content test-results.log')
                 }
                 error("Build step failed with error: ${err.getMessage()}")
               }
