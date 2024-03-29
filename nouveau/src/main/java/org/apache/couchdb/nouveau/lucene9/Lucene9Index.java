@@ -23,6 +23,7 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 import java.nio.file.NoSuchFileException;
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -65,11 +66,14 @@ import org.apache.lucene.facet.LabelAndValue;
 import org.apache.lucene.facet.StringDocValuesReaderState;
 import org.apache.lucene.facet.StringValueFacetCounts;
 import org.apache.lucene.facet.range.DoubleRangeFacetCounts;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
+import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
+import org.apache.lucene.queryparser.flexible.standard.config.PointsConfig;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.CollectorManager;
@@ -98,17 +102,20 @@ public class Lucene9Index extends Index {
     private final Analyzer analyzer;
     private final IndexWriter writer;
     private final SearcherManager searcherManager;
+    private volatile Map<String, PointsConfig> pointsConfigMap;
 
     public Lucene9Index(
             final Analyzer analyzer,
             final IndexWriter writer,
             final long updateSeq,
             final long purgeSeq,
-            final SearcherManager searcherManager) {
+            final SearcherManager searcherManager)
+            throws IOException {
         super(updateSeq, purgeSeq);
         this.analyzer = Objects.requireNonNull(analyzer);
         this.writer = Objects.requireNonNull(writer);
         this.searcherManager = Objects.requireNonNull(searcherManager);
+        initPointsConfigMap();
     }
 
     @Override
@@ -134,6 +141,7 @@ public class Lucene9Index extends Index {
     public void doUpdate(final String docId, final DocumentUpdateRequest request) throws IOException {
         final Term docIdTerm = docIdTerm(docId);
         final Document doc = toDocument(docId, request);
+        replacePointsConfigMap(doc);
         writer.updateDocument(docIdTerm, doc);
     }
 
@@ -489,7 +497,9 @@ public class Lucene9Index extends Index {
     }
 
     private Query parse(final SearchRequest request) {
-        var queryParser = new NouveauQueryParser(analyzer, request.getLocale());
+        var queryParser = new StandardQueryParser(analyzer);
+        queryParser.setPointsConfigMap(pointsConfigMap);
+
         Query result;
         try {
             result = queryParser.parse(request.getQuery(), "default");
@@ -503,6 +513,47 @@ public class Lucene9Index extends Index {
             throw new WebApplicationException(e.getMessage(), e, Status.BAD_REQUEST);
         }
         return result;
+    }
+
+    private void initPointsConfigMap() throws IOException {
+        var pointsConfigMap = new HashMap<String, PointsConfig>();
+        var dir = writer.getDirectory();
+        if (!DirectoryReader.indexExists(dir)) {
+            this.pointsConfigMap = pointsConfigMap;
+            return;
+        }
+        var doublePointsConfig = new PointsConfig(NumberFormat.getInstance(), Double.class);
+        try (var reader = DirectoryReader.open(dir)) {
+            for (var l : reader.leaves()) {
+                for (var fi : l.reader().getFieldInfos()) {
+                    if (fi.getPointDimensionCount() != 0) {
+                        pointsConfigMap.put(fi.name, doublePointsConfig);
+                    }
+                }
+            }
+        }
+        this.pointsConfigMap = pointsConfigMap;
+    }
+
+    // Replace PointsConfigMap if we have just seen at least one new double field.
+    private void replacePointsConfigMap(final Document doc) throws IOException {
+        Map<String, PointsConfig> pointsConfigMap = null;
+        PointsConfig doublePointsConfig = null;
+
+        for (var field : doc) {
+            var isDoubleField = field instanceof org.apache.lucene.document.DoubleField;
+            var isNew = !this.pointsConfigMap.containsKey(field.name());
+            if (isDoubleField && isNew) {
+                if (pointsConfigMap == null) {
+                    pointsConfigMap = new HashMap<String, PointsConfig>(this.pointsConfigMap);
+                    doublePointsConfig = new PointsConfig(NumberFormat.getInstance(), Double.class);
+                }
+                pointsConfigMap.put(field.name(), doublePointsConfig);
+            }
+        }
+        if (pointsConfigMap != null) {
+            this.pointsConfigMap = pointsConfigMap;
+        }
     }
 
     @Override

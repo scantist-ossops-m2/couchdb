@@ -15,10 +15,13 @@ package org.apache.couchdb.nouveau.lucene9;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Locale;
+import java.text.NumberFormat;
+import java.util.Map;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.DoublePoint;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
+import org.apache.lucene.queryparser.flexible.standard.config.PointsConfig;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TermRangeQuery;
@@ -31,11 +34,12 @@ public class NouveauQueryParserTest {
 
     private static final String DEFAULT_FIELD = "foo";
 
-    private static NouveauQueryParser qp;
+    private static StandardQueryParser qp;
 
     @BeforeAll
     public static void setup() {
-        qp = new NouveauQueryParser(new StandardAnalyzer(), Locale.US);
+        qp = new StandardQueryParser(new StandardAnalyzer());
+        qp.setPointsConfigMap(Map.of("num", new PointsConfig(NumberFormat.getInstance(), Double.class)));
     }
 
     @Test
@@ -67,50 +71,25 @@ public class NouveauQueryParserTest {
 
     @Test
     public void testInferredPointQuery() throws Exception {
-        assertThat(qp.parse("foo:12", DEFAULT_FIELD)).isEqualTo(DoublePoint.newExactQuery("foo", 12.0));
+        assertThat(qp.parse("num:12", DEFAULT_FIELD)).isEqualTo(DoublePoint.newExactQuery("num", 12.0));
     }
 
     @Test
     public void testInferredPointRangeQuery() throws Exception {
-        assertThat(qp.parse("foo:[1 TO 12]", DEFAULT_FIELD))
-                .isEqualTo(DoublePoint.newRangeQuery("foo", new double[] {1}, new double[] {12}));
+        assertThat(qp.parse("num:[1 TO 12]", DEFAULT_FIELD))
+                .isEqualTo(DoublePoint.newRangeQuery("num", new double[] {1}, new double[] {12}));
     }
 
     @Test
     public void testOpenLeftPointRangeQuery() throws Exception {
-        assertThat(qp.parse("foo:[* TO 100.0]", DEFAULT_FIELD))
+        assertThat(qp.parse("num:[* TO 100.0]", DEFAULT_FIELD))
                 .isEqualTo(
-                        DoublePoint.newRangeQuery("foo", new double[] {Double.NEGATIVE_INFINITY}, new double[] {100}));
+                        DoublePoint.newRangeQuery("num", new double[] {Double.NEGATIVE_INFINITY}, new double[] {100}));
     }
 
     @Test
     public void testOpenRightPointRangeQuery() throws Exception {
-        assertThat(qp.parse("foo:[1.0 TO *]", DEFAULT_FIELD))
-                .isEqualTo(DoublePoint.newRangeQuery("foo", new double[] {1}, new double[] {Double.POSITIVE_INFINITY}));
-    }
-
-    @Test
-    public void testOpenLeftPointRangeQueryLegacy() throws Exception {
-        assertThat(qp.parse("foo:[-Infinity TO 100.0]", DEFAULT_FIELD))
-                .isEqualTo(
-                        DoublePoint.newRangeQuery("foo", new double[] {Double.NEGATIVE_INFINITY}, new double[] {100}));
-    }
-
-    @Test
-    public void testOpenRightPointRangeQueryLegacy() throws Exception {
-        assertThat(qp.parse("foo:[1.0 TO Infinity]", DEFAULT_FIELD))
-                .isEqualTo(DoublePoint.newRangeQuery("foo", new double[] {1}, new double[] {Double.POSITIVE_INFINITY}));
-    }
-
-    @Test
-    public void testLocales() throws Exception {
-        var us = new NouveauQueryParser(new StandardAnalyzer(), Locale.US);
-        var de = new NouveauQueryParser(new StandardAnalyzer(), Locale.GERMAN);
-
-        assertThat(us.parse("foo:[10.0 TO 20.0]", DEFAULT_FIELD))
-                .isEqualTo(DoublePoint.newRangeQuery("foo", new double[] {10}, new double[] {20}));
-
-        assertThat(de.parse("foo:[10.0 TO 20.0]", DEFAULT_FIELD))
-                .isEqualTo(DoublePoint.newRangeQuery("foo", new double[] {100}, new double[] {200}));
+        assertThat(qp.parse("num:[1.0 TO *]", DEFAULT_FIELD))
+                .isEqualTo(DoublePoint.newRangeQuery("num", new double[] {1}, new double[] {Double.POSITIVE_INFINITY}));
     }
 }
